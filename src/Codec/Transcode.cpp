@@ -13,7 +13,9 @@
 #include <dlfcn.h>
 #endif
 #include "Util/File.h"
+#include "Util/util.h"
 #include "Util/uv_errno.h"
+#include <float.h>
 #include "Transcode.h"
 #include "Extension/AAC.h"
 #include "Extension/Opus.h"
@@ -554,15 +556,15 @@ bool FFmpegAudioFifo::Write(const AVFrame *frame) {
     }
     if (frame->pts != AV_NOPTS_VALUE) {
         // 计算fifo audio第一个采样的时间戳
-        int64_t tsp = frame->pts - _timebase * av_audio_fifo_size(_fifo);
+        double tsp = frame->pts - _timebase * av_audio_fifo_size(_fifo);
         // flv.js和webrtc对音频时间戳增量有要求, rtc要求更加严格！
         // 得尽量保证时间戳是按照sample_size累加，否则容易出现破音或杂音等问题
-        if (_tsp == AV_NOPTS_VALUE || abs(tsp - _tsp) > 500) {
+        if (fabs(_tsp) < DBL_EPSILON || fabs(tsp - _tsp) > 200) {
             InfoL << "reset base_tsp " << _tsp << "->" << tsp;
             _tsp = tsp;
         }
     } else {
-        _tsp = AV_NOPTS_VALUE;
+        _tsp = 0;
     }
 
     av_audio_fifo_write(_fifo, (void **)frame->data, frame->nb_samples);
@@ -580,10 +582,13 @@ bool FFmpegAudioFifo::Read(AVFrame *frame, int sample_size) {
     frame->format = _format;
     frame->channel_layout = av_get_default_channel_layout(_channels);
     frame->sample_rate = _samplerate;
-    frame->pts = _tsp;
-    if (_tsp != AV_NOPTS_VALUE) {
+    if (fabs(_tsp) > DBL_EPSILON) {
+        frame->pts = _tsp;
         // advance tsp by sample_size
         _tsp += sample_size * _timebase;
+    }
+    else {
+        frame->pts = AV_NOPTS_VALUE;
     }
 
     int ret = av_frame_get_buffer(frame, 0);
@@ -1021,11 +1026,15 @@ void FFmpegEncoder::onEncode(AVPacket *packet) {
             frame->_codec_id = _codecId;
             frame->_dts = packet->dts;
             frame->_pts = packet->pts;
-            frame->_buffer.assign((const char *)packet->data, packet->size);
-            // 正常是没带adts头部的
-            if (packet->size >= ADTS_HEADER_LEN && packet->data[0] == 0xFF && (packet->data[1] & 0xF0) == 0xF0) {
+            frame->_buffer.reserve(ADTS_HEADER_LEN + packet->size);
+            if (_context && _context->extradata && _context->extradata_size) {
+                uint8_t adts[ADTS_HEADER_LEN];
+                auto cfg = std::string((const char *)_context->extradata, _context->extradata_size);
+                dumpAacConfig(cfg, packet->size, adts, ADTS_HEADER_LEN);
                 frame->_prefix_size = ADTS_HEADER_LEN;
+                frame->_buffer.append((char*)adts, ADTS_HEADER_LEN);
             }
+            frame->_buffer.append((const char *)packet->data, packet->size);
             _cb(frame);
             break;
         }

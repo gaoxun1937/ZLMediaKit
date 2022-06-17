@@ -247,7 +247,7 @@ AACTrack::AACTrack(const string &aac_cfg) {
 AACTrack::AACTrack(int sample_rate, int channel, int profile)
     : _channel(channel)
     , _sampleRate(sample_rate) {
-    uint8_t audioObjectType = profile; // +1;
+    uint8_t audioObjectType = profile+1;
     int samplingFrequencyIndex = 0;
     for (size_t i = 0; i < sizeof(samplingFrequencyTable) / sizeof(samplingFrequencyTable[0]); i++) {
         if (samplingFrequencyTable[i] == (unsigned)sample_rate) {

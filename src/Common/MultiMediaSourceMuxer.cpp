@@ -14,6 +14,16 @@
 #include "Extension/AAC.h"
 #include "Extension/Opus.h"
 #include "Extension/G711.h"
+#include "Rtp/RtpSender.h"
+#include "Record/HlsRecorder.h"
+#include "Record/HlsMediaSource.h"
+#include "Rtsp/RtspMediaSourceMuxer.h"
+#include "Rtmp/RtmpMediaSourceMuxer.h"
+#include "TS/TSMediaSourceMuxer.h"
+#include "FMP4/FMP4MediaSourceMuxer.h"
+#ifdef ENABLE_FFMPEG
+#include "Codec/Transcode.h"
+#endif
 using namespace std;
 using namespace toolkit;
 

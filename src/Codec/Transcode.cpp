@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
  * This file is part of ZLMediaKit(https://github.com/ZLMediaKit/ZLMediaKit).
@@ -903,9 +903,9 @@ bool FFmpegEncoder::openAudioCodec(int samplerate, int channel, int bitrate, AVC
 }
 
 void FFmpegEncoder::flush() {
-    AVPacket *packet = av_packet_alloc();
     while (true) {
-        auto ret = avcodec_receive_packet(_context.get(), packet);
+        auto packet = alloc_av_packet();
+        auto ret = avcodec_receive_packet(_context.get(), packet.get());
         if (ret == AVERROR(EAGAIN)) {
             avcodec_send_frame(_context.get(), nullptr);
             continue;
@@ -917,9 +917,8 @@ void FFmpegEncoder::flush() {
             WarnL << "avcodec_receive_frame failed:" << ffmpeg_err(ret);
             break;
         }
-        onEncode(packet);
+        onEncode(packet.get());
     }
-    av_packet_free(&packet);
 }
 
 bool FFmpegEncoder::inputFrame(const FFmpegFrame::Ptr &frame, bool async) {
@@ -950,8 +949,11 @@ bool FFmpegEncoder::inputFrame_l(FFmpegFrame::Ptr input) {
                     _fifo.reset(new FFmpegAudioFifo());
                 // TraceL << "in " << frame->pts << ",samples " << frame->nb_samples;
                 _fifo->Write(frame);
-                FFmpegFrame audio_frame;
-                while (_fifo->Read(audio_frame.get(), _context->frame_size)) {
+                while (1) {
+                    FFmpegFrame audio_frame;
+                    if (!_fifo->Read(audio_frame.get(), _context->frame_size)){
+                        break;
+                    }
                     if (!encodeFrame(audio_frame.get())) {
                         break;
                     }
@@ -980,21 +982,18 @@ bool FFmpegEncoder::encodeFrame(AVFrame *frame) {
         WarnL << "Error sending a frame " << frame->pts << " to the encoder: " << ffmpeg_err(ret);
         return false;
     }
-
-    AVPacket *packet = av_packet_alloc();
     while (ret >= 0) {
-        ret = avcodec_receive_packet(_context.get(), packet);
+        auto packet = alloc_av_packet();
+        ret = avcodec_receive_packet(_context.get(), packet.get());
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
             break;
         else if (ret < 0) {
             WarnL << "Error encoding a frame: " << ffmpeg_err(ret);
-            av_packet_free(&packet);
             return false;
         }
         // TraceL << "out " << packet->pts << "," << packet->dts << ", size: " << packet->size;
-        onEncode(packet);
+        onEncode(packet.get());
     }
-    av_packet_free(&packet);
     return true;
 }
 

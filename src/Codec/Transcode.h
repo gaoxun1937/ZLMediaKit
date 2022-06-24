@@ -68,7 +68,7 @@ public:
     ~FFmpegAudioFifo();
 
     bool Write(const AVFrame *frame);
-    bool Read(AVFrame *frame, int sample_size);
+    FFmpegFrame::Ptr Read(int sample_size);
     int size() const;
 
 private:
@@ -174,7 +174,7 @@ public:
 private:
     bool inputFrame_l(FFmpegFrame::Ptr frame);
     bool encodeFrame(AVFrame *frame);
-    void onEncode(AVPacket *packet);
+    void onEncode(std::shared_ptr<AVPacket> packet);
     bool openVideoCodec(int width, int height, int bitrate, AVCodec *codec);
     bool openAudioCodec(int samplerate, int channel, int bitrate, AVCodec *codec);
 

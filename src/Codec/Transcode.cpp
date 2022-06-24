@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
  * This file is part of ZLMediaKit(https://github.com/ZLMediaKit/ZLMediaKit).
@@ -36,7 +36,7 @@ static string ffmpeg_err(int errnum) {
     return errbuf;
 }
 
-std::shared_ptr<AVPacket> alloc_av_packet() {
+static std::shared_ptr<AVPacket> alloc_av_packet() {
     auto pkt = std::shared_ptr<AVPacket>(av_packet_alloc(), [](AVPacket *pkt) {
         av_packet_free(&pkt);
     });
@@ -45,6 +45,17 @@ std::shared_ptr<AVPacket> alloc_av_packet() {
     return pkt;
 }
 
+static std::shared_ptr<AVFrame> alloc_av_frame() {
+    return std::shared_ptr<AVFrame>(av_frame_alloc(), [](AVFrame *pkt) {
+        av_frame_free(&pkt);
+    });
+}
+
+static std::shared_ptr<AVCodecContext> alloc_av_context(AVCodec* codec) {
+    return std::shared_ptr<AVCodecContext>(avcodec_alloc_context3(codec), [](AVCodecContext *ctx) {
+        avcodec_free_context(&ctx);
+    });
+}
 //////////////////////////////////////////////////////////////////////////////////////////
 static void on_ffmpeg_log(void *ctx, int level, const char *fmt, va_list args) {
     GET_CONFIG(bool, enable_ffmpeg_log, General::kEnableFFmpegLog);
@@ -230,9 +241,7 @@ FFmpegFrame::FFmpegFrame(std::shared_ptr<AVFrame> frame) {
     if (frame) {
         _frame = std::move(frame);
     } else {
-        _frame.reset(av_frame_alloc(), [](AVFrame *ptr) {
-            av_frame_free(&ptr);
-        });
+        _frame = alloc_av_frame();
     }
 }
 
@@ -355,9 +364,7 @@ FFmpegDecoder::FFmpegDecoder(const Track::Ptr &track, int thread_num) {
     }
 
     while (true) {
-        _context.reset(avcodec_alloc_context3(codec), [](AVCodecContext *ctx) {
-            avcodec_free_context(&ctx);
-        });
+        _context = alloc_av_context(codec);
 
         if (!_context) {
             throw std::runtime_error("创建解码器失败");
@@ -571,11 +578,13 @@ bool FFmpegAudioFifo::Write(const AVFrame *frame) {
     return true;
 }
 
-bool FFmpegAudioFifo::Read(AVFrame *frame, int sample_size) {
+FFmpegFrame::Ptr FFmpegAudioFifo::Read(int sample_size) {
     assert(_fifo);
     int fifo_size = av_audio_fifo_size(_fifo);
     if (fifo_size < sample_size)
-        return false;
+        return nullptr;
+    auto pRet = std::make_shared<FFmpegFrame>();
+    AVFrame* frame = pRet->get();
     // fill linedata
     av_samples_get_buffer_size(frame->linesize, _channels, sample_size, _format, 0);
     frame->nb_samples = sample_size;
@@ -594,11 +603,11 @@ bool FFmpegAudioFifo::Read(AVFrame *frame, int sample_size) {
     int ret = av_frame_get_buffer(frame, 0);
     if (ret < 0) {
         WarnL << "av_frame_get_buffer error " << ffmpeg_err(ret);
-        return false;
+        return nullptr;
     }
 
     av_audio_fifo_read(_fifo, (void **)frame->data, sample_size);
-    return true;
+    return pRet;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -856,7 +865,7 @@ FFmpegEncoder::~FFmpegEncoder() {
 }
 
 bool FFmpegEncoder::openVideoCodec(int width, int height, int bitrate, AVCodec *codec) {
-    _context.reset(avcodec_alloc_context3(codec), [](AVCodecContext *ctx) { avcodec_free_context(&ctx); });
+    _context = alloc_av_context(codec);
     if (_context) {
         setupContext(_context.get(), bitrate);
 
@@ -879,8 +888,7 @@ bool FFmpegEncoder::openVideoCodec(int width, int height, int bitrate, AVCodec *
 }
 
 bool FFmpegEncoder::openAudioCodec(int samplerate, int channel, int bitrate, AVCodec *codec) {
-    _context.reset(avcodec_alloc_context3(codec), [](AVCodecContext *ctx) { avcodec_free_context(&ctx); });
-
+    _context = alloc_av_context(codec);
     if (_context) {
         setupContext(_context.get(), bitrate);
 
@@ -917,7 +925,7 @@ void FFmpegEncoder::flush() {
             WarnL << "avcodec_receive_frame failed:" << ffmpeg_err(ret);
             break;
         }
-        onEncode(packet.get());
+        onEncode(std::move(packet));
     }
 }
 
@@ -950,11 +958,11 @@ bool FFmpegEncoder::inputFrame_l(FFmpegFrame::Ptr input) {
                 // TraceL << "in " << frame->pts << ",samples " << frame->nb_samples;
                 _fifo->Write(frame);
                 while (1) {
-                    FFmpegFrame audio_frame;
-                    if (!_fifo->Read(audio_frame.get(), _context->frame_size)){
+                    auto audio_frame = _fifo->Read(_context->frame_size);
+                    if (!audio_frame) {
                         break;
                     }
-                    if (!encodeFrame(audio_frame.get())) {
+                    if (!encodeFrame(audio_frame->get())) {
                         break;
                     }
                 }
@@ -992,16 +1000,99 @@ bool FFmpegEncoder::encodeFrame(AVFrame *frame) {
             return false;
         }
         // TraceL << "out " << packet->pts << "," << packet->dts << ", size: " << packet->size;
-        onEncode(packet.get());
+        onEncode(std::move(packet));
     }
     return true;
 }
 
-void FFmpegEncoder::onEncode(AVPacket *packet) {
+class FFmpegEncodedFrame : public Frame {
+public:
+    static Frame::Ptr create(std::shared_ptr<AVPacket> pkt, CodecId codec) {
+        switch (codec) {
+            case CodecH264: return std::make_shared<H264FrameHelper<FFmpegEncodedFrame> >(std::move(pkt), codec);
+            case CodecH265: return std::make_shared<H265FrameHelper<FFmpegEncodedFrame> >(std::move(pkt), codec);
+            default: return FFmpegEncodedFrame::Ptr(new FFmpegEncodedFrame(std::move(pkt), codec));
+        }
+    }
+
+    ~FFmpegEncodedFrame() override {}
+
+    uint32_t dts() const override {
+        return _pkt->dts;
+    }
+
+    uint32_t pts() const override {
+        if (abs(_pkt->dts - _pkt->pts) > 1000) {
+            return dts();
+        }
+        return _pkt->pts;
+    }
+
+    size_t prefixSize() const override {
+        switch (_codec_id) {
+            case CodecH264:
+            case CodecH265: return mediakit::prefixSize(data(), size());
+            case CodecAAC:
+				if(size() >= ADTS_HEADER_LEN && data()[0] == 0xFF)
+					return ADTS_HEADER_LEN;
+            default: return 0;
+        }
+    }
+
+    CodecId getCodecId() const override {
+        return _codec_id;
+    }
+
+    char *data() const override {
+        return (char *) _pkt->data;
+    }
+
+    size_t size() const override {
+        return _pkt->size;
+    }
+
+    bool keyFrame() const override {
+        return _pkt->flags & AV_PKT_FLAG_KEY;
+    }
+
+    bool configFrame() const override {
+        return false;
+    }
+protected:
+    FFmpegEncodedFrame(std::shared_ptr<AVPacket> pkt, CodecId codec) {
+        _pkt = std::move(pkt);
+        _codec_id = codec;
+    }
+
+protected:
+    CodecId _codec_id;
+    std::shared_ptr<AVPacket> _pkt;
+};
+
+void FFmpegEncoder::onEncode(std::shared_ptr<AVPacket> packet) {
     // process frame
     if (!_cb)
         return;
     switch (_codecId) {
+        case CodecAAC: {
+            // ffmpeg aac编码正常是不返回adts头部的，这边重新生成下
+            auto frame = FrameImp::create<>();
+            frame->_codec_id = _codecId;
+            frame->_dts = packet->dts;
+            frame->_pts = packet->pts;
+            frame->_buffer.reserve(ADTS_HEADER_LEN + packet->size);
+            if (_context && _context->extradata && _context->extradata_size) {
+                uint8_t adts[ADTS_HEADER_LEN];
+                auto cfg = std::string((const char *)_context->extradata, _context->extradata_size);
+                dumpAacConfig(cfg, packet->size, adts, ADTS_HEADER_LEN);
+                frame->_prefix_size = ADTS_HEADER_LEN;
+                frame->_buffer.append((char*)adts, ADTS_HEADER_LEN);
+            }
+            frame->_buffer.append((const char *)packet->data, packet->size);
+            _cb(frame);
+            break;
+        }
+#if 0
         case CodecH264: {
             auto frame = FrameImp::create<H264Frame>();
             frame->_dts = packet->dts;
@@ -1020,23 +1111,7 @@ void FFmpegEncoder::onEncode(AVPacket *packet) {
             _cb(frame);
             break;
         }
-        case CodecAAC: {
-            auto frame = FrameImp::create<>();
-            frame->_codec_id = _codecId;
-            frame->_dts = packet->dts;
-            frame->_pts = packet->pts;
-            frame->_buffer.reserve(ADTS_HEADER_LEN + packet->size);
-            if (_context && _context->extradata && _context->extradata_size) {
-                uint8_t adts[ADTS_HEADER_LEN];
-                auto cfg = std::string((const char *)_context->extradata, _context->extradata_size);
-                dumpAacConfig(cfg, packet->size, adts, ADTS_HEADER_LEN);
-                frame->_prefix_size = ADTS_HEADER_LEN;
-                frame->_buffer.append((char*)adts, ADTS_HEADER_LEN);
-            }
-            frame->_buffer.append((const char *)packet->data, packet->size);
-            _cb(frame);
-            break;
-        }
+
         case CodecOpus:
         case CodecG711A:
         case CodecG711U: {
@@ -1058,7 +1133,13 @@ void FFmpegEncoder::onEncode(AVPacket *packet) {
             _cb(frame);
             break;
         }
-        default: break;
+        default: 
+            break;
+#else
+        default:
+    		_cb(FFmpegEncodedFrame::create(packet, _codecId));
+			break;
+#endif
     }
 }
 

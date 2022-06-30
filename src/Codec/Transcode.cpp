@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
  * This file is part of ZLMediaKit(https://github.com/ZLMediaKit/ZLMediaKit).
@@ -744,7 +744,9 @@ FFmpegFrame::Ptr FFmpegSws::inputFrame(const FFmpegFrame::Ptr &frame) {
 
 void setupContext(AVCodecContext *_context, int bitrate) {
     //保存AVFrame的引用
+#ifdef FF_API_OLD_ENCDEC
     _context->refcounted_frames = 1;
+#endif
     _context->flags |= AV_CODEC_FLAG_LOW_DELAY;
     _context->flags2 |= AV_CODEC_FLAG2_FAST;
     _context->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
@@ -755,8 +757,8 @@ void setupContext(AVCodecContext *_context, int bitrate) {
 
 FFmpegEncoder::FFmpegEncoder(const Track::Ptr &track, int thread_num) {
     setupFFmpeg();
-    AVCodec *codec = nullptr;
-    AVCodec *codec_default = nullptr;
+    const AVCodec *codec = nullptr;
+    const AVCodec *codec_default = nullptr;
     _codecId = track->getCodecId();
     switch (_codecId) {
     case CodecH264:
@@ -860,7 +862,7 @@ FFmpegEncoder::~FFmpegEncoder() {
     av_dict_free(&_dict);
 }
 
-bool FFmpegEncoder::openVideoCodec(int width, int height, int bitrate, AVCodec *codec) {
+bool FFmpegEncoder::openVideoCodec(int width, int height, int bitrate, const AVCodec *codec) {
     _context.reset(avcodec_alloc_context3(codec), [](AVCodecContext *ctx) { avcodec_free_context(&ctx); });
     if (_context) {
         setupContext(_context.get(), bitrate);
@@ -883,7 +885,7 @@ bool FFmpegEncoder::openVideoCodec(int width, int height, int bitrate, AVCodec *
     return false;
 }
 
-bool FFmpegEncoder::openAudioCodec(int samplerate, int channel, int bitrate, AVCodec *codec) {
+bool FFmpegEncoder::openAudioCodec(int samplerate, int channel, int bitrate, const AVCodec *codec) {
     _context.reset(avcodec_alloc_context3(codec), [](AVCodecContext *ctx) { avcodec_free_context(&ctx); });
 
     if (_context) {

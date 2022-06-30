@@ -22,6 +22,10 @@ endif()
 set(CMAKE_CXX_STANDARD 11)
 #加载自定义模块
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+set(DEP_ROOT_DIR ${CMAKE_SOURCE_DIR}/3rdpart/external-${CMAKE_SYSTEM_NAME})
+if(NOT EXISTS ${DEP_ROOT_DIR})
+    file(MAKE_DIRECTORY ${DEP_ROOT_DIR})
+endif()
 
 find_program(CCACHE_FOUND ccache)
 if(CCACHE_FOUND)
@@ -98,15 +102,17 @@ option(ENABLE_API "Enable C API SDK" true)
 option(ENABLE_CXX_API "Enable C++ API SDK" false)
 option(ENABLE_TESTS "Enable Tests" true)
 option(ENABLE_SERVER "Enable Server" true)
+option(ENABLE_SERVER_LIB "Enable server as android static library" false)
 option(ENABLE_MEM_DEBUG "Enable Memory Debug" false)
 option(ENABLE_ASAN "Enable Address Sanitize" false)
 option(ENABLE_WEBRTC "Enable WebRTC" true)
 option(ENABLE_PLAYER "Enable Player" true)
-option(ENABLE_FFMPEG "Enable FFmpeg" true)
+option(ENABLE_FFMPEG "Enable FFmpeg" false)
 option(ENABLE_MSVC_MT "Enable MSVC Mt/Mtd lib" true)
 option(ENABLE_API_STATIC_LIB "Enable mk_api static lib" false)
 option(USE_SOLUTION_FOLDERS "Enable solution dir supported" ON)
 option(ENABLE_SRT "Enable SRT" true)
+option(ENABLE_JEMALLOC_STATIC "Enable static linking to the jemalloc library" false)
 # ----------------------------------------------------------------------------
 # Solution folders:
 # ----------------------------------------------------------------------------
@@ -296,6 +302,13 @@ if (ENABLE_FFMPEG)
         message(WARNING "ffmpeg相关功能未找到")
     endif ()
 
+endif ()
+
+if(ENABLE_JEMALLOC_STATIC)
+    include(cmake/Jemalloc.cmake)
+    include_directories(${DEP_ROOT_DIR}/${JEMALLOC_NAME}/include/jemalloc)
+    link_directories(${DEP_ROOT_DIR}/${JEMALLOC_NAME}/lib)
+    set(JEMALLOC_ROOT_DIR "${DEP_ROOT_DIR}/${JEMALLOC_NAME}")
 endif ()
 
 #默认链接jemalloc库避免内存碎片
@@ -520,4 +533,8 @@ endif ()
 #播放器
 if (ENABLE_PLAYER)
     add_subdirectory(player)
+endif ()
+
+if (ENABLE_SERVER_LIB)
+    set(LINK_LIB_LIST ${LINK_LIB_LIST} PARENT_SCOPE)
 endif ()

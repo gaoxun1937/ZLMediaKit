@@ -1236,11 +1236,111 @@ void play_plugin(Session &sender, const WebRtcArgs &args, const WebRtcPluginMana
         invoker("");
     }
 }
+//广播
+using AudioBroadcastInvoker = std::function<void(std::string &err)>;
+void broadcast_plugin(
+    Session &sender, const WebRtcArgs &args, const WebRtcPluginManager::onCreateRtc &cb) {
+    MediaInfo info(args["url"]);
+    Broadcast::PublishAuthInvoker invoker = [cb,info](const string &err, const ProtocolOption &option) mutable {
+        if (!err.empty()) {
+            cb(WebRtcException(SockException(Err_other, err)));
+            return;
+        }
 
+        RtspMediaSourceImp::Ptr push_src;
+        std::shared_ptr<void> push_src_ownership;
+        auto src = MediaSource::find(RTSP_SCHEMA, info._vhost, info._app, info._streamid);
+        auto push_exists = (bool)src;
+
+//        while (src) {
+//            // 尝试断连后继续推流
+//            auto rtsp_src = dynamic_pointer_cast<RtspMediaSourceImp>(src);
+//            if (!rtsp_src) {
+//                // 源不是rtsp推流产生的
+//                break;
+//            }
+//            auto ownership = rtsp_src->getOwnership();
+//            if (!ownership) {
+//                // 获取推流源所有权失败
+//                break;
+//            }
+//            push_src = std::move(rtsp_src);
+//            push_src_ownership = std::move(ownership);
+//            push_failed = false;
+//            break;
+//        }
+
+//        if (push_failed) {
+//            cb(WebRtcException(SockException(Err_other, "already publishing")));
+//            return;
+//        }
+
+        if (push_exists) {
+            info._app = "broadcast";
+            push_src = std::make_shared<RtspMediaSourceImp>(info._vhost, info._app, info._streamid);
+            push_src_ownership = push_src->getOwnership();
+            push_src->setProtocolOption(option);
+        }else{
+            cb(WebRtcException(SockException(Err_other, "stream not found")));
+            return;
+        }
+
+        //TODO 创建流之前先进行摄像头语音的前期接口调用，之后查找如果有推向摄像头的流，这边才创建
+
+        //TODO 需先判断推向摄像头的流是否已经存在
+        //摄像头语音的前期接口调用，判断摄像头是否接受语音
+        AudioBroadcastInvoker invoker = [info,cb,push_src,push_src_ownership,option](std::string &err){
+            if (err.empty()) {
+                //                EventPollerPool::Instance().getPoller()->async([info,push_src,push_src_ownership,option,args,cb](){
+                //                    try{
+                //创建推流
+                auto rtc
+                    = WebRtcPusher::create(EventPollerPool::Instance().getPoller(), push_src, push_src_ownership, info, option);
+                push_src->setListener(rtc);
+                //                        EventPoller::Ptr poller = EventPoller::getCurrentPoller();
+                //                        void *listener_tag = poller.get();
+                //                        auto on_timeout = poller->doDelayTask(10000000, [push_src]() {
+                //                            push_src->close(true);
+                //                            return 0;
+                //                        });
+                //                        on_timeout->cancel();
+                //                        if (ex) {
+                //                            cb(WebRtcException(ex));
+                //                        }else{
+                cb(*rtc);
+                //                        }
+                //创建推向摄像头的流
+                //                        push_src->getOwnerPoller()->doDelayTask(5000,[args,push_src,cb,rtc]() mutable {
+                //                            TraceL << "startSendRtp, pt " << int(args.pt) << " ps " << args.use_ps << " audio " << args.only_audio;
+                //                            push_src-> startSendRtp(args, [=](uint16_t local_port, const SockException &ex) mutable {
+                //                            });
+                //                            return 0;
+                //                        });
+                //                    }catch(std::exception &ex){
+                //                        ErrorL << ex.what();
+                //                    }
+                //                });
+            }else{
+                cb(WebRtcException(SockException(Err_other,err)));
+                return;
+            }
+        };
+        NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastAudioBroadcastPush, info,invoker);
+    };
+
+    // rtsp推流需要鉴权
+    //    auto flag = NoticeCenter::Instance().emitEvent(
+    //        Broadcast::kBroadcastMediaPublish, MediaOriginType::rtc_push, info, invoker, static_cast<SockInfo &>(sender));
+    //    if (!flag) {
+    // 该事件无人监听,默认不鉴权
+    invoker("", ProtocolOption());
+    //    }
+}
 static onceToken s_rtc_auto_register([]() {
     WebRtcPluginManager::Instance().registerPlugin("echo", echo_plugin);
     WebRtcPluginManager::Instance().registerPlugin("push", push_plugin);
     WebRtcPluginManager::Instance().registerPlugin("play", play_plugin);
+    WebRtcPluginManager::Instance().registerPlugin("broadcast", broadcast_plugin);
 });
 
 }// namespace mediakit

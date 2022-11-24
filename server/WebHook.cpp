@@ -51,7 +51,7 @@ const string kAdminParams = HOOK_FIELD"admin_params";
 const string kAliveInterval = HOOK_FIELD"alive_interval";
 const string kRetry = HOOK_FIELD"retry";
 const string kRetryDelay = HOOK_FIELD"retry_delay";
-
+const string kOnBroadcastPush = HOOK_FIELD"on_broadcast_push";
 onceToken token([](){
     mINI::Instance()[kEnable] = false;
     mINI::Instance()[kTimeoutSec] = 10;
@@ -100,12 +100,16 @@ static void parse_http_response(const SockException &ex, const Parser &res,
         fun(Json::nullValue, errStr);
         return;
     }
+    Value result;
     if (res.Url() != "200") {
-        auto errStr = StrPrinter << "[bad http status code]:" << res.Url() << endl;
-        fun(Json::nullValue, errStr);
+        if(!res.Content().empty()){
+            fun(Json::nullValue, res.Content());
+        }else{
+            auto errStr = StrPrinter << "[bad http status code]:" << res.Url() << endl;
+            fun(Json::nullValue, errStr);
+        }
         return;
     }
-    Value result;
     try {
         stringstream ss(res.Content());
         ss >> result;
@@ -421,7 +425,32 @@ void installWebHook(){
             invoker(obj["encrypted"].asBool(),obj["passwd"].asString());
         });
     });
-
+    NoticeCenter::Instance().addListener(nullptr,Broadcast::kBroadcastAudioBroadcastPush,[](BroadcastAudioBroadcastPushArgs){
+        GET_CONFIG(string,hook_broadcast_push,Hook::kOnBroadcastPush);
+        if(!hook_enable || hook_broadcast_push.empty()){
+            return;
+        }
+        ArgsType body;
+        body["stream"] = info._streamid;
+        body[VHOST_KEY] = info._vhost;
+        body["app"] = info._app;
+        //执行hook
+        do_http_hook(hook_broadcast_push,body, [invoker](const Value &obj,const std::string &err){
+                //            MediaSourceEvent::SendRtpArgs args;
+                //            if(err.empty()){
+                //                args.passive = false;
+                //                args.dst_url = obj["dst_url"].asString();
+                //                args.dst_port = obj["dst_port"].asUInt();
+                //                args.ssrc = obj["ssrc"].asString();
+                //                args.is_udp = obj["is_udp"].asBool();
+                //                args.src_port = obj["src_port"].asUInt();
+                //                args.pt = obj["pt"].empty() ? 96 : obj["pt"].asUInt();
+                //                args.use_ps = obj["use_ps"].empty() || obj["use_ps"].asBool();
+                //                args.only_audio = !obj["only_audio"].empty() && obj["only_audio"].asBool();
+                //            }
+                invoker(err);
+            },0);
+    });
 
     //监听rtsp、rtmp源注册或注销事件
     NoticeCenter::Instance().addListener(&web_hook_tag,Broadcast::kBroadcastMediaChanged,[](BroadcastMediaChangedArgs){

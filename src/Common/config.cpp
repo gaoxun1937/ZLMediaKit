@@ -40,6 +40,7 @@ bool loadIniConfig(const char *ini_path) {
 }
 ////////////广播名称///////////
 namespace Broadcast {
+const string kBroadcastAudioBroadcastPush = "kBroadcastAudioBroadcastPush";
 const string kBroadcastMediaChanged = "kBroadcastMediaChanged";
 const string kBroadcastRecordMP4 = "kBroadcastRecordMP4";
 const string kBroadcastRecordTs = "kBroadcastRecordTs";

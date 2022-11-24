@@ -30,6 +30,9 @@ bool loadIniConfig(const char *ini_path = nullptr);
 
 ////////////广播名称///////////
 namespace Broadcast {
+// 广播推流事件广播
+extern const std::string kBroadcastAudioBroadcastPush;
+#define BroadcastAudioBroadcastPushArgs MediaInfo &info, std::function<void(const std::string &err)> &invoker
 
 // 注册或反注册MediaSource事件广播
 extern const std::string kBroadcastMediaChanged;

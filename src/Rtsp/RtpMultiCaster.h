@@ -15,9 +15,7 @@
 #include <memory>
 #include <unordered_set>
 #include <unordered_map>
-#include "Common/config.h"
 #include "RtspMediaSource.h"
-#include "Util/mini.h"
 #include "Network/Socket.h"
 
 namespace mediakit{
@@ -43,18 +41,19 @@ private:
 
 class RtpMultiCaster {
 public:
-    typedef std::shared_ptr<RtpMultiCaster> Ptr;
-    typedef std::function<void()> onDetach;
+    using Ptr = std::shared_ptr<RtpMultiCaster>;
+    using onDetach = std::function<void()>;
+
     ~RtpMultiCaster();
 
-    static Ptr get(toolkit::SocketHelper &helper, const std::string &local_ip, const std::string &vhost, const std::string &app, const std::string &stream);
+    static Ptr get(toolkit::SocketHelper &helper, const std::string &local_ip, const std::string &vhost, const std::string &app, const std::string &stream, uint32_t multicast_ip = 0, uint16_t video_port = 0, uint16_t audio_port = 0);
     void setDetachCB(void *listener,const onDetach &cb);
 
     std::string getMultiCasterIP();
     uint16_t getMultiCasterPort(TrackType trackType);
 
 private:
-    RtpMultiCaster(toolkit::SocketHelper &helper, const std::string &local_ip, const std::string &vhost, const std::string &app, const std::string &stream);
+    RtpMultiCaster(toolkit::SocketHelper &helper, const std::string &local_ip, const std::string &vhost, const std::string &app, const std::string &stream, uint32_t multicast_ip, uint16_t video_port, uint16_t audio_port);
 
 private:
     std::recursive_mutex _mtx;

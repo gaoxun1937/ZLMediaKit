@@ -10,6 +10,7 @@
 
 #include "Sdp.h"
 #include "Rtsp/Rtsp.h"
+#include "Common/config.h"
 #include <cinttypes>
 
 using namespace std;
@@ -1442,7 +1443,8 @@ void RtcConfigure::RtcTrackConfigure::setDefaultSetting(TrackType type){
                     {RtpExtType::color_space,                 RtpDirection::sendrecv},
                     {RtpExtType::video_content_type,          RtpDirection::sendrecv},
                     {RtpExtType::playout_delay,               RtpDirection::sendrecv},
-                    {RtpExtType::video_orientation,           RtpDirection::sendrecv},
+                    //手机端推webrtc 会带有旋转角度，rtc协议能正常播放 其他协议拉流画面旋转
+                    //{RtpExtType::video_orientation,           RtpDirection::sendrecv},
                     {RtpExtType::toffset,                     RtpDirection::sendrecv},
                     {RtpExtType::framemarking,                RtpDirection::sendrecv}
             };

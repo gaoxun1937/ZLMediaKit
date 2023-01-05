@@ -14,44 +14,17 @@
 #include <set>
 #include <vector>
 #include <unordered_set>
-#include <unordered_map>
-#include "Util/util.h"
-#include "Util/logger.h"
-#include "Common/config.h"
 #include "Network/Session.h"
-#include "Player/PlayerBase.h"
-#include "RtpMultiCaster.h"
-#include "RtspMediaSource.h"
 #include "RtspSplitter.h"
 #include "RtpReceiver.h"
-#include "RtspMediaSourceImp.h"
-#include "Common/Stamp.h"
 #include "Rtcp/RtcpContext.h"
+#include "RtspMediaSource.h"
+#include "RtspMediaSourceImp.h"
+#include "RtpMultiCaster.h"
 
 namespace mediakit {
 
-class RtspSession;
-
-class BufferRtp : public toolkit::Buffer{
-public:
-    using Ptr = std::shared_ptr<BufferRtp>;
-
-    BufferRtp(Buffer::Ptr pkt, size_t offset = 0) : _offset(offset), _rtp(std::move(pkt)) {}
-    ~BufferRtp() override = default;
-
-    char *data() const override {
-        return (char *)_rtp->data() + _offset;
-    }
-
-    size_t size() const override {
-        return _rtp->size() - _offset;
-    }
-
-private:
-    size_t _offset;
-    Buffer::Ptr _rtp;
-};
-
+using BufferRtp = toolkit::BufferOffset<toolkit::Buffer::Ptr>;
 class RtspSession : public toolkit::Session, public RtspSplitter, public RtpReceiver, public MediaSourceEvent {
 public:
     using Ptr = std::shared_ptr<RtspSession>;
@@ -98,6 +71,24 @@ protected:
     ssize_t send(toolkit::Buffer::Ptr pkt) override;
     //收到RTCP包回调
     virtual void onRtcpPacket(int track_idx, SdpTrack::Ptr &track, const char *data, size_t len);
+
+    //回复客户端
+    virtual bool sendRtspResponse(const std::string &res_code, const StrCaseMap &header = StrCaseMap(), const std::string &sdp = "", const char *protocol = "RTSP/1.0");
+
+protected:
+    //url解析后保存的相关信息
+    MediaInfo _media_info;
+
+    ////////RTP over udp_multicast////////
+    //共享的rtp组播对象
+    RtpMultiCaster::Ptr _multicaster;
+
+    //Session号
+    std::string _sessionid;
+
+    uint32_t _multicast_ip = 0;
+    uint16_t _multicast_video_port = 0;
+    uint16_t _multicast_audio_port = 0;
 
 private:
     //处理options方法,获取服务器能力
@@ -157,7 +148,6 @@ private:
     void updateRtcpContext(const RtpPacket::Ptr &rtp);
     //回复客户端
     bool sendRtspResponse(const std::string &res_code, const std::initializer_list<std::string> &header, const std::string &sdp = "", const char *protocol = "RTSP/1.0");
-    bool sendRtspResponse(const std::string &res_code, const StrCaseMap &header = StrCaseMap(), const std::string &sdp = "", const char *protocol = "RTSP/1.0");
 
     //设置socket标志
     void setSocketFlags();
@@ -176,8 +166,6 @@ private:
     uint64_t _bytes_usage = 0;
     //ContentBase
     std::string _content_base;
-    //Session号
-    std::string _sessionid;
     //记录是否需要rtsp专属鉴权，防止重复触发事件
     std::string _rtsp_realm;
     //登录认证
@@ -185,8 +173,6 @@ private:
     //用于判断客户端是否超时
     toolkit::Ticker _alive_ticker;
 
-    //url解析后保存的相关信息
-    MediaInfo _media_info;
     //rtsp推流相关绑定的源
     RtspMediaSourceImp::Ptr _push_src;
     //推流器所有权
@@ -207,9 +193,6 @@ private:
     toolkit::Socket::Ptr _rtcp_socks[2];
     //标记是否收到播放的udp打洞包,收到播放的udp打洞包后才能知道其外网udp端口号
     std::unordered_set<int> _udp_connected_flags;
-    ////////RTP over udp_multicast////////
-    //共享的rtp组播对象
-    RtpMultiCaster::Ptr _multicaster;
     ////////RTSP over HTTP  ////////
     //quicktime 请求rtsp会产生两次tcp连接，
     //一次发送 get 一次发送post，需要通过x-sessioncookie关联起来
